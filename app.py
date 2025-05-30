@@ -11,7 +11,6 @@ from safetensors.torch import load_file
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-from dotenv import load_dotenv
 
 # Additional imports for PDF and DOCX support
 import PyPDF2
@@ -82,11 +81,16 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-load_dotenv()
-
-# Configuration - Update these with your actual values
+# Configuration - Use environment variables for Render deployment
 YOUR_HF_ORGANIZATION = os.getenv("HF_ORGANIZATION")
-YOUR_HF_TOKEN = os.getenv("HF_TOKEN")
+HF_TOKEN = os.getenv("HF_TOKEN")
+
+# Validate configuration
+if not YOUR_HF_ORGANIZATION or not HF_TOKEN:
+    st.error("❌ Missing required environment variables.")
+    st.info("Please ensure HF_ORGANIZATION and HF_TOKEN are set in your Render environment variables.")
+    st.info("Go to your Render dashboard > Service Settings > Environment Variables to add them.")
+    st.stop()
 
 # Model paths from your Hugging Face organization
 MATURITY_MODEL_PATH = f"{YOUR_HF_ORGANIZATION}/compliance-maturity-classifier"
@@ -343,7 +347,6 @@ def extract_text_from_pdf(uploaded_file):
     try:
         # Method 1: Try pdfplumber first (better for complex PDFs)
         try:
-            import pdfplumber
             pdf_bytes = uploaded_file.read()
             text = ""
 
@@ -567,18 +570,48 @@ def create_rule_based_gap_analysis(question, evidence, current_level, target_lev
         gap_desc = f"Current incident management relies on informal processes without centralized tracking, escalation, or compliance reporting capabilities."
         gap_initiative = "Deploy incident management system, establish formal procedures, implement compliance reporting"
         common_gap = "Incident Management Process Gap"
+    elif any(keyword in evidence_lower for keyword in ['data', 'backup', 'recovery']):
+        gap_desc = f"Current data management practices lack systematic backup, recovery, and data governance controls required for Level {target_level} compliance."
+        gap_initiative = "Implement data governance framework, establish backup and recovery procedures, deploy data classification controls"
+        common_gap = "Data Management Control Gap"
+    elif any(keyword in evidence_lower for keyword in ['monitoring', 'logging', 'audit']):
+        gap_desc = f"Current monitoring and logging capabilities are insufficient for comprehensive audit trails and real-time threat detection required for Level {target_level}."
+        gap_initiative = "Deploy centralized logging system, implement continuous monitoring, establish audit trail procedures"
+        common_gap = "Monitoring and Logging Gap"
+    elif any(keyword in evidence_lower for keyword in ['training', 'awareness', 'education']):
+        gap_desc = f"Current security awareness program lacks structured training, regular assessments, and role-based education required for Level {target_level} maturity."
+        gap_initiative = "Develop comprehensive training program, implement regular awareness campaigns, establish role-based security education"
+        common_gap = "Security Awareness Training Gap"
+    elif any(keyword in evidence_lower for keyword in ['risk', 'assessment', 'management']):
+        gap_desc = f"Current risk management framework lacks formal assessment procedures, quantitative analysis, and continuous monitoring required for Level {target_level}."
+        gap_initiative = "Implement risk assessment framework, establish quantitative risk analysis, deploy continuous risk monitoring"
+        common_gap = "Risk Management Framework Gap"
+    elif any(keyword in evidence_lower for keyword in ['policy', 'procedure', 'documentation']):
+        gap_desc = f"Current policy and procedure documentation lacks comprehensive coverage, regular updates, and enforcement mechanisms required for Level {target_level}."
+        gap_initiative = "Develop comprehensive policy framework, establish regular review procedures, implement policy enforcement controls"
+        common_gap = "Policy and Documentation Gap"
+    elif any(keyword in evidence_lower for keyword in ['vendor', 'third', 'party', 'supplier']):
+        gap_desc = f"Current vendor management lacks systematic due diligence, ongoing monitoring, and contract controls required for Level {target_level} compliance."
+        gap_initiative = "Implement vendor risk assessment program, establish ongoing monitoring procedures, develop contract security requirements"
+        common_gap = "Vendor Management Control Gap"
+    elif any(keyword in evidence_lower for keyword in ['business', 'continuity', 'disaster']):
+        gap_desc = f"Current business continuity planning lacks comprehensive testing, recovery procedures, and crisis management required for Level {target_level}."
+        gap_initiative = "Develop business continuity plan, implement regular testing procedures, establish crisis management framework"
+        common_gap = "Business Continuity Planning Gap"
     else:
         gap_desc = f"Current {domain.lower()} procedures lack documentation depth and control frameworks required for Level {target_level} {framework} compliance."
         gap_initiative = "Develop comprehensive procedures, implement process controls, establish compliance monitoring"
         common_gap = "Documentation and Process Control Gap"
 
-    # Severity assessment
+    # Severity assessment based on maturity gap and domain
     if maturity_gap >= 3:
-        severity = "HIGH - Critical compliance gap with immediate regulatory risks"
+        severity = "HIGH - Critical compliance gap with immediate regulatory risks and potential business impact"
     elif maturity_gap >= 2:
-        severity = "MEDIUM-HIGH - Significant compliance exposure requiring prioritized attention"
+        severity = "MEDIUM-HIGH - Significant compliance exposure requiring prioritized attention and resource allocation"
+    elif maturity_gap >= 1:
+        severity = "MEDIUM - Moderate gap requiring structured improvement and timeline commitment"
     else:
-        severity = "MEDIUM - Moderate gap requiring structured improvement"
+        severity = "LOW - Minor enhancement opportunity with minimal compliance risk"
 
     return {
         "gap_description": gap_desc,
@@ -701,10 +734,10 @@ def render_gap_analysis_form(gap_components):
         # Severity Assessment
         st.markdown("**⚠️ Severity Assessment**")
         severity_options = [
-            "LOW - Minor gap with limited regulatory impact",
-            "MEDIUM - Moderate gap requiring structured improvement",
-            "MEDIUM-HIGH - Significant compliance exposure requiring prioritized attention",
-            "HIGH - Critical compliance gap with immediate regulatory risks"
+            "LOW - Minor enhancement opportunity with minimal compliance risk",
+            "MEDIUM - Moderate gap requiring structured improvement and timeline commitment",
+            "MEDIUM-HIGH - Significant compliance exposure requiring prioritized attention and resource allocation",
+            "HIGH - Critical compliance gap with immediate regulatory risks and potential business impact"
         ]
 
         current_severity = gap_components.get("severity_assessment", "")
@@ -744,12 +777,6 @@ def main():
     st.title("🎯 Compliance Maturity & Gap Analysis Platform")
     st.markdown("*Automated maturity assessment and gap analysis for regulatory compliance*")
     st.markdown("---")
-
-    # Check configuration
-    if YOUR_HF_ORGANIZATION == "your-organization-name" or HF_TOKEN == "your-hugging-face-token":
-        st.error("❌ Please update the configuration with your actual Hugging Face organization and token.")
-        st.info("📝 Update YOUR_HF_ORGANIZATION and HF_TOKEN variables in the code.")
-        return
 
     # Load models
     with st.spinner("🤖 Loading AI models from Hugging Face..."):
@@ -970,7 +997,12 @@ def main():
                     gap_model, gap_tokenizer, gap_prompt, gap_model_name,
                     question, evidence_text, current_maturity, target_maturity, domain, framework
                 )
-                gap_components = parse_gap_analysis_result(gap_result)
+                
+                # Handle both string and dict returns from gap analysis
+                if isinstance(gap_result, str):
+                    gap_components = parse_gap_analysis_result(gap_result)
+                else:
+                    gap_components = gap_result
 
                 # Calculate averages
                 current_average = current_maturity
